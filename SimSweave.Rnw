@@ -1,0 +1,121 @@
+\documentclass{article}
+\usepackage[paper=letterpaper,
+            marginparwidth=.5in,     % Length of section titles
+            marginparsep=.05in,       % Space between titles and text
+            margin=.7in,               % 1 inch margins
+            includemp]{geometry}
+
+\setlength{\parindent}{0in}
+%\include{Sweave}
+\begin{document}
+
+This document contains code to simulate contact-collar-like data.
+
+What does Paul's sampling scheme look like?  
+
+<<PaulScheme, echo=T>>=
+names(Data.nodup)
+#-- I want an imageplot of dyadID by obs.period --#
+table(Data.nodup$num.cont)
+image.mat<-matrix(NA,nrow=length(levels(as.factor(Data.nodup$obs.period))),ncol=length(levels(as.factor(Data.nodup$dyadID))))
+
+for(i in 1:dim(image.mat)[1]){
+  for(j in 1:dim(image.mat)[2]){
+    k<-subset(Data.nodup,obs.period==i & dyadID==j)
+    image.mat[i,j]<-ifelse(dim(k)[1]==0,0,ifelse(k$num.cont>=1,1,.5))
+  }
+}
+
+# ----- Define a function for plotting a matrix ----- #
+myImagePlot <- function(x, ...){
+     min <- min(x)
+     max <- max(x)
+     yLabels <- rownames(x)
+     xLabels <- colnames(x)
+     title <-c()
+# check for null values
+if( is.null(xLabels) ){
+   xLabels <- c(1:ncol(x))
+}
+if( is.null(yLabels) ){
+   yLabels <- c(1:nrow(x))
+}
+
+ ColorLevels <- c("white","red","black")
+
+ # Reverse Y axis
+ reverse <- nrow(x) : 1
+ yLabels <- yLabels[reverse]
+ x <- x[reverse,]
+
+ # Data Map
+ image(1:length(xLabels), 1:length(yLabels), t(x), col=ColorLevels, xlab="",
+ ylab="", axes=FALSE, zlim=c(min,max))
+ if( !is.null(title) ){
+    title(main=title)
+ }
+axis(BELOW<-1, at=1:length(xLabels), labels=xLabels, cex.axis=0.7)
+ axis(LEFT <-2, at=1:length(yLabels), labels=yLabels, las= HORIZONTAL<-1,
+ cex.axis=0.7)
+
+}
+# ----- END plot function ----- #
+table(is.na(image.mat))
+myImagePlot(image.mat)
+
+@
+
+In the first pass of simulation, use observed sampling structure (number of replicates on dyad-period combinations) and the observed group sizes.  Vary group size effect
+
+<<SimFunction, echo=T>>=
+#-- subset dataset to look at only those observations that have recorded group sizes. --#
+Data.nodup_grpsize<-subset(Data.nodup, is.na(groupsize)=="FALSE")
+
+#-- build some utility functions for applys in big simulation function --#
+Gamma.fun<-function(GrpSize){rnorm(1,Theta*data$groupsize,Sigma_gamma)}
+y.fun<-function(Lambda){rpois(1,Lambda)}
+
+#-- require lme4, since models are built using lmer --#
+install.packages("lme4")
+require(lme4)
+
+SimFun<-function(ParVector,data=Data.nodup_grpsize){
+    #-- unpack parameter vector --#
+      Theta<-ParVector$Theta
+      Sigma_gamma<-ParVector$Sigma_gamma
+      Sigma_dyad<-ParVector$Sigma_dyad
+      Beta_0<-ParVector$Beta_0
+      Reps<-ParVector$Reps
+      GrpSize<-data$groupsize
+      SimOutList<-vector("list",Reps)  
+      
+    for(i in 1:Reps){
+        #-- set up hierarchical structure --#
+          #-- calculate groupsize component for each period --#
+             Gamma<-unlist(lapply(data$groupsize,Gamma.fun))
+          #-- randomly determine dyad effect for each dyad --#
+             DyadEffect<-rnorm(length(levels(as.factor(data$dyadID))),0,sd=Sigma_dyad)
+        #-- build the Poisson rate parameter from the intercept, the appropriate groupsize 
+        #-- effect and the appropriate dyad effect using the observed sampling stucture --#
+          Lambda<-Beta_0+Gamma+DyadEffect[as.numeric(as.factor(Data.nodup_grpsize$dyadID))]
+
+       #-- simulate reponse (y) about mean lambda --#
+        data$y<-unlist(lapply(Lambda,y.fun))
+
+      #-- fit and store lmer model --#
+        fitout<-lmer(y~groupsize+1|dyadID,data=data)
+        coefs<-summary(fitout)@coefs
+        vcovs<-summary(fitout)@vcov
+        REmat<-summary(fitout)@REmat
+        resid<-summary(fitout)@sigma
+      SimOutList[[i]]<-list(coefs=coefs,vcovs=vcovs,REmat=REmat,resid=resid,data=data)
+      }
+    return(SimOutList)
+}
+
+#-- read in a parameter vector --#
+ParVector<-read.csv("ParamMat.csv",header=T)
+SimOut<-SimFun(ParVector,data=Data.nodup_grpsize)
+@
+
+\end{document}
