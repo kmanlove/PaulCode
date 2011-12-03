@@ -14,17 +14,20 @@ This document contains code to simulate contact-collar-like data.
 What does Paul's sampling scheme look like?  
 
 <<PaulScheme, echo=T>>=
+setwd("~/work/StatProjects/Paul/Contact/KeziaWork/LMERSimulationSweave/")
+load("Data.nodup.RData")
 names(Data.nodup)
 #-- I want an imageplot of dyadID by obs.period --#
 table(Data.nodup$num.cont)
 image.mat<-matrix(NA,nrow=length(levels(as.factor(Data.nodup$obs.period))),ncol=length(levels(as.factor(Data.nodup$dyadID))))
 
-for(i in 1:dim(image.mat)[1]){
-  for(j in 1:dim(image.mat)[2]){
-    k<-subset(Data.nodup,obs.period==i & dyadID==j)
-    image.mat[i,j]<-ifelse(dim(k)[1]==0,0,ifelse(k$num.cont>=1,1,.5))
-  }
-}
+
+#for(i in 1:dim(image.mat)[1]){
+#  for(j in 1:dim(image.mat)[2]){
+#    k<-subset(Data.nodup,obs.period==i & dyadID==j)
+#    image.mat[i,j]<-ifelse(dim(k)[1]==0,0,ifelse(k$num.cont>=1,1,.5))
+#  }
+#}
 
 # ----- Define a function for plotting a matrix ----- #
 myImagePlot <- function(x, ...){
@@ -61,7 +64,7 @@ axis(BELOW<-1, at=1:length(xLabels), labels=xLabels, cex.axis=0.7)
 }
 # ----- END plot function ----- #
 table(is.na(image.mat))
-myImagePlot(image.mat)
+# myImagePlot(image.mat)
 
 @
 
@@ -76,7 +79,7 @@ Gamma.fun<-function(GrpSize){rnorm(1,Theta*data$groupsize,Sigma_gamma)}
 y.fun<-function(Lambda){rpois(1,Lambda)}
 
 #-- require lme4, since models are built using lmer --#
-install.packages("lme4")
+
 require(lme4)
 
 SimFun<-function(ParVector,data=Data.nodup_grpsize){
@@ -115,7 +118,7 @@ SimFun<-function(ParVector,data=Data.nodup_grpsize){
 
 #-- read in a parameter vector --#
 ParVector<-read.csv("ParamMat.csv",header=T)
-SimOut<-SimFun(ParVector,data=Data.nodup_grpsize)
+#SimOut<-SimFun(ParVector,data=Data.nodup_grpsize)
 @
 
 Test change.
