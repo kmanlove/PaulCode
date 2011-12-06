@@ -79,7 +79,68 @@ Subset dataset to look at only those observations that have recorded group sizes
 Data.nodup_grpsize<-subset(Data.nodup, is.na(groupsize)=="FALSE")
 @
 
-Build functions to simulate and construct models.
+Build functions to simulate and construct models.  The following two functions are used:
+
+\begin{itemize}
+  \item DesignBuildFun
+    \begin{itemize}
+      \item Arguments
+        \begin{itemize}
+          \item data, the dataset under use (here, Data.nodup from Paul)
+          \item ParVector, a vector containing the following elements
+            \begin{itemize}
+              \item NoDyads -- number of dyads to include in the simulation
+              \item NoPeriods -- number of groups sampled
+              \item PropDyads -- proportion of dyads that actually get sampled
+              \item PropPeriods -- proportion of periods that actually get sampled
+              \item Sigma_dyad -- standard deviation of dyad random effects
+              \item Theta -- fixed effect on group size that governs mean of period random effect
+              \item Sigma_gamma -- standard deviation of period random effect
+              \itme Beta_0 -- intercept term for mean of the poisson process that generates number of contacts
+              \item Reps -- number of replicate simulation runs to conduct for this parameter set
+              \item MinGrp -- smallest groupsize to examine in this simulation
+              \itme MaxGrp -- largest groupsize to examine in this simulation
+            \end{itemize}
+        \end{itemize}
+    \end{itemize}
+    \begin{enumerate}
+      \item Generates a sequence of integers (group sizes) that increase logarithmically from the min to the max observed group size (approx 10 to 500).  These will become column "labels" for the design matrix.
+      \item Builds a response screen that drops a subset of dyad observations from each group, so that the number of dyad pairs observed in each column is no greater than n*(n-1)/2 (the best sampling that could occur given the number of possible pairs for each group size).  
+      \item Subsamples from this reduced (saturated) dataset, based on proportions specified in PropDyads and PropPeriods, to replicate sampling schemes with varying degrees of missingness.
+      \item Runs ``Reps'' number of simulations through NewSimFun, which simulates response values, fits the lmer function, and extracts desired model estimates.
+    \end{enumerate}
+
+  \item NewSimFun
+    \begin{itemize}
+      \item Arguments
+        \begin{itemize}
+              \item NoDyads -- number of dyads to include in the simulation
+              \item NoPeriods -- number of groups sampled
+              \item Sigma_dyad -- standard deviation of dyad random effects
+              \item Theta -- fixed effect on group size that governs mean of period random effect
+              \item Sigma_gamma -- standard deviation of period random effect
+              \itme Beta_0 -- intercept term for mean of the poisson process that generates number of contacts
+              \item Reps -- number of replicate simulation runs to conduct for this parameter set
+              \item ResponseScreen -- matrix constructed and passed from DesignBuildFun that blocks out excluded regions of the sampling design
+              \item SimGrpSize -- Group sizes for each sampling period.
+        \end{itemize}
+      \item Values
+        \begin{itemize}
+          \item A vector containing the following: estimated sigma_dyad, estimated sigma_gamma, estimated theta, estimated beta0, estimated residual variation
+        \end{itemize}
+    \end{itemize}
+  \item Operations
+    \begin{itemize}
+      \item Draws dyad and period random effects (so, these are different for each simulated run within a simulation group but have common hyperparameters)
+      \item Simulates response values for the sampling design specified by ResponseScreen
+      \item Populations covariate matrices for dyads, periods, group sizes.
+      \item fits a lmer model of the form 
+        \begin{verbatim}
+ ModelFit<-lmer(Contacts~log(Groupsize)+(1|DyadID)+(1|PeriodID),family=poisson,data=modeldata)
+        \end{verbatim}
+    \end{itemize}
+  \end{itemize}
+\end{itemize}
 
 <<simchunk,echo=T>>=
 #-- build some utility functions for applys in big simulation function --#
@@ -87,39 +148,64 @@ Gamma.fun<-function(GrpSize,Theta,Sigma_gamma){rnorm(1,Theta*GrpSize,Sigma_gamma
 y.fun<-function(Lambda){rpois(1,Lambda)}
 GrpFillin.fun<-function(InitGroupSize,k){ifelse(is.na(InitGroupSize)==TRUE,sample(na.omit(k),1),InitGroupSize)}
 
+Pois.fun<-function(k){rpois(1,exp(k))}
+
+
 #-- require lme4, since models are built using lmer --#
 require(lme4)
 
-
-#-- function to build saturated (but reduced so that number of pairs doesn't exceed group size) design matrix --#
-
-DesignBuiltFun<-function(data,ParVector){
-#    NoDyads<-ParVector$NoDyads
-#    NoPeriods<-ParVector$NoPeriods
-#    Sigma_dyad<-ParVector$Sigma_dyad
-#    Theta<-ParVector$Theta
-#    Sigma_gamma<-ParVector$Sigma_gamma
-#    Beta_0 <- ParVector$Sigma_gamma
-#    Reps<-ParVector$Reps
-#    MinGrp<-ParVector$MinGrp
-#    MaxGrp<-ParVector$MaxGrp
-  
-    NoDyads<-200
-    NoPeriods<-100
-    Sigma_dyad<-1
-    Theta<--2
-    Sigma_gamma<-1
-    Beta_0<-.743
-    Reps<-10
-    MinGrp<-10
-    MaxGrp<-500
-    PropDyads<-1
-    PropPeriods<-.9
+NewSimFun<-function(Beta_0=Beta0,Theta=Theta,Sigma_dyad=Sigma_dyad,Sigma_gamma=Sigma_gamma,ResponseScreen=ResponseScreen,NoDyads=NoDyads,NoPeriods=NoPeriods,SimGrpSize=SimGrpSize){
     
-    #-- 1) generate a sequence of integers (group sizes) that increases logarithmically from the min to the max observed group size (approx 10 to 500).  These will become column "labels" for the design matrix.
+     DyadEffect<-rnorm(NoDyads,0,Sigma_dyad)
+     PeriodEffect<-rnorm(NoPeriods,Theta*log(SimGrpSize),Sigma_gamma)
+    
+     DyadEffectMat<-matrix(rep(DyadEffect,times=dim(ResponseMat)[2]),nrow=NoDyads,ncol=NoPeriods,byrow=F)     
+     GrpsizeMat<-matrix(rep(SimGrpSize,times=dim(ResponseMat)[1]),nrow=NoDyads,ncol=NoPeriods,byrow=T)
+     PeriodEffectMat<-matrix(rep(PeriodEffect,times=dim(ResponseMat)[1]),nrow=NoDyads,ncol=NoPeriods,byrow=T)
+     DyadMat<-matrix(rep(1:length(DyadEffect),times=dim(ResponseMat)[2]),nrow=NoDyads,ncol=NoPeriods,byrow=F)
+     PeriodMat<-matrix(rep(1:length(PeriodEffect),times=dim(ResponseMat)[1]),nrow=NoDyads,ncol=NoPeriods,byrow=T)
+      
+     LambdaMat<-Beta_0+DyadEffectMat+PeriodEffectMat 
+     ResponseMat<-apply(LambdaMat,c(1,2),Pois.fun)
+     
+     ResponseMat[is.na(ResponseScreen)==TRUE]<-NA
+     DyadMat[is.na(ResponseScreen)==TRUE]<-NA       
+     PeriodMat[is.na(ResponseScreen)==TRUE]<-NA
+     GrpsizeMat[is.na(ResponseScreen)==TRUE]<-NA
+     modeldata<-na.omit(as.data.frame(cbind(as.vector(ResponseMat),as.vector(DyadMat),as.vector(PeriodMat),as.vector(GrpsizeMat))))
+     names(modeldata)<-c("Contacts","DyadID","PeriodID","Groupsize")
+
+    ModelFit<-lmer(Contacts~log(Groupsize)+(1|DyadID)+(1|PeriodID),family=poisson,data=modeldata)
+  k<-summary(ModelFit)
+  beta0.coef<-k@coefs[1]
+  theta.coef<-k@coefs[2]
+  dyad.sd<-k@REmat[1,4]
+  period.sd<-k@REmat[2,4]
+  resid<-k@sigma
+  SimOutVec<-c(beta0.coef,theta.coef,dyad.sd,period.sd,resid)
+ #-- add in individual estimated dyad effects.  --#'
+ #-- get this function to return an indicator for convergence problems.
+ #-- add Nakagawa's (2010) calculation of R for latent vs. observed. --#
+      
+  return(SimOutVec)
+}
+
+
+DesignBuildFun<-function(data,ParVector){
+   NoDyads<-ParVector$NoDyads
+   NoPeriods<-ParVector$NoPeriods
+   Sigma_dyad<-ParVector$Sigma_dyad
+   Theta<-ParVector$Theta
+   Sigma_gamma<-ParVector$Sigma_gamma
+   Beta_0 <- ParVector$Sigma_gamma
+   Reps<-ParVector$Reps
+   MinGrp<-ParVector$MinGrp
+   MaxGrp<-ParVector$MaxGrp
+    
+    #-- 1) 
   SimGrpSize<-floor(exp(seq(log(MinGrp),log(MaxGrp),length.out=NoPeriods)))
     
-    #-- 2) build a response screen that drops a subset of dyad observations from each group, so that the number of dyad pairs observed in each column is no greater than n*(n-1)/2, and subsample from this reduced saturated dataset, based on proportions specified in PropDyads and PropPeriods.
+    #-- 2) 
       ResponseScreen<-matrix(NA,nrow=NoDyads,ncol=NoPeriods)
       PeriodsToKeep<-sample(1:NoPeriods,size=floor(PropPeriods*NoPeriods),rep=F)
       PeriodsToKeep<-PeriodsToKeep[order(PeriodsToKeep)]  #-- reorders previous vector.
@@ -133,78 +219,32 @@ DesignBuiltFun<-function(data,ParVector){
         ResponseScreen[!((1:dim(ResponseScreen)[1] %in% samp)),j]<-NA
       }
     
-#        ResponseScreen[1:dim(ResponseScreen)[1] %in% DyadsToKeep, 1:dim(ResponseScreen)[2] %in% PeriodsToKeep]<-0
-#        ResponseScreen[1:dim(ResponseScreen)[1]!(%in% DyadsToKeep),!(%in% PeriodsToKeep)]<-NA
-#          for(i in 1:NoDyads){
-#            ResponseScreen[i,j]<-ifelse(i %in% DyadsToKeep & j %in% PeriodsToKeep,0,NA)
-#          }
-#        }
-      }
-    
-    #-- 3) run Reps number of simulations through NewSimFun, which simulates response values, fits the lmer function, and extracts desired model estimates.  
-  
+    #-- 3)   
     OutList<-vector("list",length=Reps)
+    OutMat<-matrix(NA,nrow=Reps,ncol=5)
+
     for(i in 1:length(OutList)){   
       set.seed(seed=i)    #-- this may not work... check. 
-OutList[[i]]<-NewSimFun(Beta_0=Beta_0,Theta=Theta,Sigma_dyad=Sigma_dyad,Sigma_gamma=Sigma_gamma,ResponseScreen=ResponseScreen,NoDyads=NoDyads,NoPeriods=NoPeriods,SimGrpSize=SimGrpSize)
+      k<-NewSimFun(Beta_0=Beta_0,Theta=Theta,Sigma_dyad=Sigma_dyad,Sigma_gamma=Sigma_gamma,ResponseScreen=ResponseScreen,NoDyads=NoDyads,NoPeriods=NoPeriods,SimGrpSize=SimGrpSize)
+      OutList[[i]]<-k
+      OutMat[i,]<-k
 }
-    return(OutList)
-}
-
-
-
-NewSimFun<-function(Beta_0=Beta0,Theta=Theta,Sigma_dyad=Sigma_dyad,Sigma_gamma=Sigma_gamma,ResponseScreen=ResponseScreen,NoDyads=NoDyads,NoPeriods=NoPeriods,SimGrpSize=SimGrpSize){
-      #-- determine random effect values for dyads and periods.
-    
-      DyadEffect<-rnorm(NoDyads,0,Sigma_dyad)
-      PeriodEffect<-rnorm(NoPeriods,Theta*log(SimGrpSize),Sigma_gamma)
-    
-    #-- populate reduced design matrix with responses drawn from poisson with   (Beta_0+rnorm(1,theta*GroupSize,sigma_gamma)+rnorm(1,0,sigma_dyad)
-      
-     ResponseMat<-matrix(NA,nrow=NoDyads,ncol=NoPeriods)
-     DyadMat<-matrix(NA,nrow=NoDyads,ncol=NoPeriods)
-     PeriodREMat<-matrix(NA,nrow=NoDyads,ncol=NoPeriods)
-     GrpsizeMat<-matrix(NA,nrow=NoDyads,ncol=NoPeriods)
- DyadEffectMat<-matrix(rep(DyadEffect,times=dim(ResponseMat)[2]),nrow=length(DyadEffect),ncol=length(PeriodEffect),byrow=F)      PeriodEffectMat<-matrix(rep(PeriodEffect,times=dim(ResponseMat)[1]),nrow=length(DyadEffect),ncol=length(PeriodEffect),byrow=T)
- DyadMat<-matrix(rep(1:length(DyadEffect),times=dim(ResponseMat)[2]),nrow=length(DyadEffect),ncol=length(PeriodEffect),byrow=F)
- PeriodMat<-matrix(rep(1:length(PeriodEffect),times=dim(ResponseMat)[1]),nrow=length(DyadEffect),ncol=length(PeriodEffect),byrow=T)
-      
-     ResponseMat<-rpois(1,exp(Beta_0+DyadEffectMat+PeriodEffectMat))
-     ResponseMat[is.na(ResponseScreen)==TRUE]<-NA  #-- test to eliminate for-loop
-     DyadMat[is.na(ResponseScreen)==TRUE]<-NA       
-     PeriodMat[is.na(ResponseScreen)==TRUE]<-NA
-      
-#      for(i in 1:dim(ResponseMat)[1]){ 
-#        for(j in 1:dim(ResponseMat)[2]){
-#           if(is.na(ResponseScreen[i,j])==TRUE){
-#             ResponseMat[i,j]<-NA
-#             DyadMat[i,j]<-NA
-#             PeriodREMat[i,j]<-NA
-#           } else {
-#             ResponseMat[i,j]<-rpois(1,exp(Beta_0+DyadEffect[i]+PeriodEffect[j]))
-#             DyadMat[i,j]<-i
-#             PeriodREMat[i,j]<-j
-#             GrpsizeMat[i,j]<-SimGrpSize[j]
-#           }
-#        }
-#      }
-    modeldata<-na.omit(as.data.frame(cbind(as.vector(ResponseMat),as.vector(DyadMat),as.vector(PeriodREMat),as.vector(GrpsizeMat))))
-names(modeldata)<-c("Contacts","DyadID","PeriodID","Groupsize")
-    ModelFit<-lmer(Contacts~log(Groupsize)+(1|DyadID)+(1|PeriodID),family=poisson,data=modeldata)
-  k<-summary(ModelFit)
-  beta0.coef<-k@coefs[1]
-  theta.coef<-k@coefs[2]
-  dyad.sd<-k@REmat[1,4]
-  period.sd<-k@REmat[2,4]
-  resid<-k@sigma
-#  SimOutList<-list(coefs=coefs,vcovs=vcovs,REmat=REmat,resid=resid,data=modeldata)
-  SimOutVec<-c(beta0.coef,theta.coef,dyad.sd,period.sd,resid)
- #-- add in individual estimated dyad effects.  --#
-  #-- also add Nakagawa's (2010) calculation of R for latent vs. observed. --#
-      
-  return(SimOutVec)
+    return(list(OutList,OutMat))
 }
 
+#-- trial run
+ParMatrix<-read.csv("ParamMat2.csv",header=T,sep=";")
+DesignOut<-DesignBuildFun(ParVector=ParMatrix[1,],data=Data.nodup)
+
+#-- build a function to run multiple parameter sets --#
+MultiParamSim<-function(ParMatrix,data,GroupFillin){
+  MultiOut<-vector("list",dim(ParMatrix)[1])
+    for(i in 1:dim(ParMatrix)[1]){ SingleSim<-DesignSimBuild(ParVector=as.vector(ParMatrix[i,]),data=data,GroupFillin=GroupFillin)
+      MultiOut[[i]]<-SingleSim
+    }
+  OutList<-list(MultiOut,ParMatrix)
+  return(OutList)
+}
 
 #-- old code; now maybe scratch.  
 
