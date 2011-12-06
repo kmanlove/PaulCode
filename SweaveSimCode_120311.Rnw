@@ -1,0 +1,448 @@
+\documentclass{article}
+\begin{document}
+
+\section{Intro}
+This document lays out code to simulate response values and fit lmer models for data similar to Paul Cross's elk contact collar data.  
+\subsection{Assumptions}
+\section{Realized Study Design}
+
+<<setupchunk, echo=T>>=
+#setwd("~/work/StatProjects/Paul/Contact/KeziaWork/LMERSimulationSweave/")
+#load("Data.nodup.RData")
+load(".RData")
+names(Data.nodup)
+#-- I want an imageplot of dyadID by obs.period --#
+table(Data.nodup$num.cont)
+image.mat<-matrix(NA,nrow=length(levels(as.factor(Data.nodup$obs.period))),ncol=length(levels(as.factor(Data.nodup$dyadID))))
+@
+
+Build a plot of the design matrix. 
+
+<<imagechunk, echo=T>>=
+for(i in 1:dim(image.mat)[1]){
+  for(j in 1:dim(image.mat)[2]){
+    k<-subset(Data.nodup,obs.period==i & dyadID==j)
+    image.mat[i,j]<-ifelse(dim(k)[1]==0,0,ifelse(k$num.cont>=1,1,.5))
+  }
+}
+
+# ----- Define a function for plotting a matrix ----- #
+myImagePlot <- function(x, ...){
+     min <- min(x)
+     max <- max(x)
+     yLabels <- rownames(x)
+     xLabels <- colnames(x)
+     title <-c()
+# check for null values
+if( is.null(xLabels) ){
+   xLabels <- c(1:ncol(x))
+}
+if( is.null(yLabels) ){
+   yLabels <- c(1:nrow(x))
+}
+
+ ColorLevels <- c("white","red","black")
+
+ # Reverse Y axis
+ reverse <- nrow(x) : 1
+ yLabels <- yLabels[reverse]
+ x <- x[reverse,]
+
+ # Data Map
+ image(1:length(xLabels), 1:length(yLabels), t(x), col=ColorLevels, xlab="Period",
+ ylab="Dyad ID", axes=FALSE, zlim=c(min,max))
+ if( !is.null(title) ){
+    title(main=title)
+ }
+axis(BELOW<-1, at=1:length(xLabels), labels=xLabels, cex.axis=0.7)
+ axis(LEFT <-2, at=1:length(yLabels), labels=yLabels, las= HORIZONTAL<-1,
+ cex.axis=0.7)
+
+}
+# ----- END plot function ----- #
+table(is.na(image.mat))
+@
+
+Plot:
+
+<<Fig=T,echo=T>>=
+par(mfrow=c(1,1))
+myImagePlot(image.mat)
+leg.text<-c("Not in same group","","No contact","","Contacts")
+legend("topright",leg.text,fill=c("white","white","red","white","black"),border=c("black","white","black","white","black"),bty="n",cex=.8)
+@
+
+
+Subset dataset to look at only those observations that have recorded group sizes. 
+
+<<datasubchunk,echo=T>>=
+Data.nodup_grpsize<-subset(Data.nodup, is.na(groupsize)=="FALSE")
+@
+
+Build functions to simulate and construct models.
+
+<<simchunk,echo=T>>=
+#-- build some utility functions for applys in big simulation function --#
+Gamma.fun<-function(GrpSize,Theta,Sigma_gamma){rnorm(1,Theta*GrpSize,Sigma_gamma)}
+y.fun<-function(Lambda){rpois(1,Lambda)}
+GrpFillin.fun<-function(InitGroupSize,k){ifelse(is.na(InitGroupSize)==TRUE,sample(na.omit(k),1),InitGroupSize)}
+
+#-- require lme4, since models are built using lmer --#
+require(lme4)
+
+
+#-- function to build saturated (but reduced so that number of pairs doesn't exceed group size) design matrix --#
+
+DesignBuiltFun<-function(data,ParVector){
+#    NoDyads<-ParVector$NoDyads
+#    NoPeriods<-ParVector$NoPeriods
+#    Sigma_dyad<-ParVector$Sigma_dyad
+#    Theta<-ParVector$Theta
+#    Sigma_gamma<-ParVector$Sigma_gamma
+#    Beta_0 <- ParVector$Sigma_gamma
+#    Reps<-ParVector$Reps
+#    MinGrp<-ParVector$MinGrp
+#    MaxGrp<-ParVector$MaxGrp
+  
+    NoDyads<-200
+    NoPeriods<-100
+    Sigma_dyad<-1
+    Theta<--2
+    Sigma_gamma<-1
+    Beta_0<-.743
+    Reps<-10
+    MinGrp<-10
+    MaxGrp<-500
+    PropDyads<-1
+    PropPeriods<-1
+    
+    #-- 1) generate a sequence of integers (group sizes) that increases logarithmically from the min to the max observed group size (approx 10 to 500).  These will become column "labels" for the design matrix.
+  SimGrpSize<-floor(exp(seq(log(MinGrp),log(MaxGrp),length.out=NoPeriods)))
+    
+    #-- 2) build a response screen that drops a subset of dyad observations from each group, so that the number of dyad pairs observed in each column is no greater than n*(n-1)/2, and subsample from this reduced saturated dataset, based on proportions specified in PropDyads and PropPeriods.
+      ResponseScreen<-matrix(NA,nrow=NoDyads,ncol=NoPeriods)
+    
+     for(j in 1:dim(ResponseScreen)[2]){
+        PeriodsToKeep<-sample(1:NoPeriods,size=floor(PropPeriods*NoPeriods),rep=F)
+        k<-SimGrpSize[j]*(SimGrpSize[j]-1)/2
+            #-- I want to sample k intergers between 1 and NoDyads.
+        DyadsToKeep<-sample(1:NoDyads,size=floor(min(k*PropDyads,NoDyads)),rep=F)
+          for(i in 1:NoDyads){
+            ResponseScreen[i,j]<-ifelse(i %in% DyadsToKeep & j %in% PeriodsToKeep,0,NA)
+          }
+        }
+      }
+    
+    #-- 3) run Reps number of simulations through NewSimFun, which simulates response values, fits the lmer function, and extracts desired model estimates.  
+  
+    OutList<-vector("list",length=Reps)
+    for(i in 1:length(OutList)){   
+OutList[[i]]<-NewSimFun(Beta_0=Beta_0,Theta=Theta,Sigma_dyad=Sigma_dyad,Sigma_gamma=Sigma_gamma,ResponseScreen=ResponseScreen,NoDyads=NoDyads,NoPeriods=NoPeriods,SimGrpSize=SimGrpSize)
+}
+    return(OutList)
+}
+
+
+
+NewSimFun<-function(Beta_0=Beta0,Theta=Theta,Sigma_dyad=Sigma_dyad,Sigma_gamma=Sigma_gamma,ResponseScreen=ResponseScreen,NoDyads=NoDyads,NoPeriods=NoPeriods,SimGrpSize=SimGrpSize){
+      #-- determine random effect values for dyads and periods.
+    
+      DyadEffect<-rnorm(NoDyads,0,Sigma_dyad)
+      PeriodEffect<-rnorm(NoPeriods,Theta*log(SimGrpSize),Sigma_gamma)
+    
+    #-- populate reduced design matrix with responses drawn from poisson with   (Beta_0+rnorm(1,theta*GroupSize,sigma_gamma)+rnorm(1,0,sigma_dyad)
+      
+     ResponseMat<-matrix(NA,nrow=NoDyads,ncol=NoPeriods)
+     DyadMat<-matrix(NA,nrow=NoDyads,ncol=NoPeriods)
+     PeriodREMat<-matrix(NA,nrow=NoDyads,ncol=NoPeriods)
+     GrpsizeMat<-matrix(NA,nrow=NoDyads,ncol=NoPeriods)
+
+     ResponseMat[is.na(ResponseScreen)==TRUE]<-NA  
+     ResponseMat[is.na(ResponseScreen)==FALSE]<-
+      for(i in 1:dim(ResponseMat)[1]){ 
+        for(j in 1:dim(ResponseMat)[2]){
+           if(is.na(ResponseScreen[i,j])==TRUE){
+             ResponseMat[i,j]<-NA
+             DyadMat[i,j]<-NA
+             PeriodREMat[i,j]<-NA
+           } else {
+             ResponseMat[i,j]<-rpois(1,exp(Beta_0+DyadEffect[i]+PeriodEffect[j]))
+             DyadMat[i,j]<-i
+             PeriodREMat[i,j]<-j
+             GrpsizeMat[i,j]<-SimGrpSize[j]
+           }
+        }
+      }
+    modeldata<-na.omit(as.data.frame(cbind(as.vector(ResponseMat),as.vector(DyadMat),as.vector(PeriodREMat),as.vector(GrpsizeMat))))
+names(modeldata)<-c("Contacts","DyadID","PeriodID","Groupsize")
+    ModelFit<-lmer(Contacts~log(Groupsize)+(1|DyadID)+(1|PeriodID),family=poisson,data=modeldata)
+  k<-summary(ModelFit)
+  beta0.coef<-k@coefs[1]
+  theta.coef<-k@coefs[2]
+  dyad.sd<-k@REmat[1,4]
+  period.sd<-k@REmat[2,4]
+  resid<-k@sigma
+#  SimOutList<-list(coefs=coefs,vcovs=vcovs,REmat=REmat,resid=resid,data=modeldata)
+  SimOutVec<-c(beta0.coef,theta.coef,dyad.sd,period.sd,resid)
+ #-- add in individual estimated dyad effects.  --#
+  #-- also add Nakagawa's (2010) calculation of R for latent vs. observed. --#
+      
+  return(SimOutVec)
+}
+
+
+#-- old code; now maybe scratch.  
+
+SimFun<-function(ParVector,data,GroupFillin){
+  #-- this function requires a vector of parameters (of form in ParamMat), a dataset, and --#
+  #-- a logical (GroupFillin) that if set to true samples from the empirical groupsize --#
+  #-- values and fills them in for all missing group sizes, and if false, uses only the --#
+  #-- manifested design matrix.--#
+    #-- unpack parameter vector --#
+      Theta<-ParVector$Theta
+      Sigma_gamma<-ParVector$Sigma_gamma
+      Sigma_dyad<-ParVector$Sigma_dyad
+      Beta_0<-ParVector$Beta_0
+      Reps<-ParVector$Reps
+      SimOutList<-vector("list",Reps)  
+      InitGroupSize<-data$groupsize
+      
+      #-- identify sampling scheme and sample for group sizes if indicated.--#
+      if(GroupFillin==TRUE){
+         data$GrpSize<-lapply(InitGroupSize,GrpFillin.fun,k=data$groupsize)
+          } 
+        else {
+          data$GrpSize<-InitGroupSize
+        }
+      
+      data<-subset(data,is.na(GrpSize)==FALSE)
+      #-- main for-loop through which simulations occur --#
+      
+    for(i in 1:Reps){
+        #-- set up hierarchical structure --#
+          #-- calculate groupsize component for each period --#
+             Gamma<-unlist(lapply(data$GrpSize,Gamma.fun,Theta=Theta,Sigma_gamma=Sigma_gamma))
+          #-- randomly determine dyad effect for each dyad --#
+             DyadEffect<-rnorm(length(levels(as.factor(data$dyadID))),0,sd=Sigma_dyad)
+        #-- build the Poisson rate parameter from the intercept, the appropriate groupsize 
+        #-- effect and the appropriate dyad effect using the observed sampling stucture --#
+          Lambda<-exp(Beta_0+Gamma+DyadEffect[as.numeric(as.factor(Data.nodup_grpsize$dyadID))])
+
+       #-- simulate reponse (y) about mean lambda --#
+        data$y<-unlist(lapply(Lambda,y.fun))
+
+      #-- fit and store lmer model --#
+        fitout<-lmer(y~as.numeric(groupsize)+(1|dyadID),data=data)
+        coefs<-summary(fitout)@coefs
+        vcovs<-summary(fitout)@vcov
+        REmat<-summary(fitout)@REmat
+        resid<-summary(fitout)@sigma
+      SimOutList[[i]]<-list(coefs=coefs,vcovs=vcovs,REmat=REmat,resid=resid,data=data)
+      }
+    return(SimOutList)
+}
+
+#-- build a function to run multiple parameter sets --#
+MultiParamSim<-function(ParMatrix,data,GroupFillin){
+  MultiOut<-vector("list",dim(ParMatrix)[1])
+    for(i in 1:dim(ParMatrix)[1]){
+      SingleSim<-SimFun(ParVector=as.vector(ParMatrix[i,]),data=data,GroupFillin=GroupFillin)
+      MultiOut[[i]]<-SingleSim
+    }
+  OutList<-list(MultiOut,ParMatrix)
+  return(OutList)
+}
+
+@
+
+Run simulations.
+
+<<simrunchunk,echo=T>>=
+
+#-- read in a parameter vector --#
+ParMatrix<-read.csv("ParamMat.csv",header=T,sep=";")
+#-- ParMatrix<-read.csv("TrialParams.csv",header=T,sep=";")
+
+MultiOut<-MultiParamSim(ParMatrix=ParMatrix,data=Data.nodup,GroupFillin="FALSE")
+dput(MultiOut,"FillinFalseSimOutput_120411")
+
+
+@
+
+
+Plots:
+
+<<Fig=T,echo=T>>=
+Rep.fun<-function(k){rep(k,times=100)}
+beta0_in<-sapply(ParMatrix$Beta_0,Rep.fun)
+theta_in<-sapply(ParMatrix$Theta,Rep.fun)
+sigmadyad_in<-sapply(ParMatrix$Sigma_dyad,Rep.fun)
+
+beta0_out<-matrix(NA,ncol=29,nrow=100)
+sigmaresid_out<-matrix(NA,ncol=29,nrow=100)
+theta_out<-matrix(NA,ncol=29,nrow=100)
+sigmadyad_out<-matrix(NA,ncol=29,nrow=100)
+
+for(j in 1:29){
+  for(i in 1:100){
+    beta0_out[i,j]<-MultiOut[[1]][[j]][[i]]$coefs[[1]]
+    theta_out[i,j]<-MultiOut[[1]][[j]][[i]]$coefs[[2]]
+    sigmaresid_out[i,j]<-MultiOut[[1]][[j]][[i]]$resid[[1]]
+    sigmadyad_out[i,j]<-MultiOut[[1]][[j]][[i]]$REmat[[1,4]]
+  }
+}
+
+plot(as.vector(theta_out)~as.vector(theta_in),type="p",pch=as.vector(as.factor(sigmadyad_in)))
+
+theta.dat<-as.data.frame(cbind(as.vector(theta_in),as.vector(theta_out),as.vector(sigmadyad_in)))
+names(theta.dat)<-c("Theta_in","Theta_out","SigmaDyad_in")
+
+theta.sds<-tapply(theta.dat$Theta_out,list(theta.dat$Theta_in,theta.dat$SigmaDyad_in),sd)
+
+theta.sds2<-as.vector(theta.sds)
+theta.in<-rep(c(-2,-.01,2),times=3)
+sigmadyad.in<-rep(c(.1,1,10),each=3)
+
+plot(theta.sds2~theta.in,type="p",pch=as.numeric(as.factor(sigmadyad.in)),xlab="True Theta",ylab="SD(Estimated Thetas)")
+leg.text<-c("Sigma_dyad = .1","Sigma_dyad = 1", "Sigma_dyad = 10")
+legend("topleft",leg.text,pch=c(1,2,3),bty="n")
+
+@
+
+
+<<PlotSimCode, echo=T>>=
+#-- some utility functions --#
+Rep.fun<-function(k,m){rep(k,times=m)}
+
+#-- main plotting function --#
+ThetaPlotFun<-function(MultiOutSim,ParMatrix){
+  beta0_in<-sapply(ParMatrix$Beta_0,Rep.fun,m=ParMatrix$Reps[1])
+  theta_in<-sapply(ParMatrix$Theta,Rep.fun,m=ParMatrix$Reps[1])
+  sigmadyad_in<-sapply(ParMatrix$Sigma_dyad,Rep.fun,m=ParMatrix$Reps[1])
+
+beta0_out<-matrix(NA,ncol=dim(ParMatrix)[1],nrow=ParMatrix$Reps[1])
+sigmaresid_out<-matrix(NA,ncol=dim(ParMatrix)[1],nrow=ParMatrix$Reps[1])
+theta_out<-matrix(NA,ncol=dim(ParMatrix)[1],nrow=ParMatrix$Reps[1])
+sigmadyad_out<-matrix(NA,ncol=dim(ParMatrix)[1],nrow=ParMatrix$Reps[1])
+
+for(j in 1:dim(ParMatrix)[1]){
+  for(i in 1:ParMatrix$Reps[1]){
+    beta0_out[i,j]<-MultiOutSim[[1]][[j]][[i]]$coefs[[1]]
+    theta_out[i,j]<-MultiOutSim[[1]][[j]][[i]]$coefs[[2]]
+    sigmaresid_out[i,j]<-MultiOutSim[[1]][[j]][[i]]$resid[[1]]
+    sigmadyad_out[i,j]<-MultiOutSim[[1]][[j]][[i]]$REmat[[1,4]]
+  }
+}
+
+  par(mfrow=c(1,2))
+plot(as.vector(theta_out)~as.vector(theta_in),type="p",,xlab="True Theta",ylab="Estimated Theta",pch=as.vector(as.factor(sigmadyad_in)))
+
+theta.dat<-as.data.frame(cbind(as.vector(theta_in),as.vector(theta_out),as.vector(sigmadyad_in)))
+names(theta.dat)<-c("Theta_in","Theta_out","SigmaDyad_in")
+
+theta.sds<-tapply(theta.dat$Theta_out,list(theta.dat$Theta_in,theta.dat$SigmaDyad_in),sd)
+
+theta.sds2<-as.vector(theta.sds)
+theta.in<-rep(c(-2,-.01,2),times=3)
+sigmadyad.in<-rep(c(.1,1,10),each=3)
+
+plot(theta.sds2~theta.in,type="p",pch=as.numeric(as.factor(sigmadyad.in)),xlab="True Theta",ylab="SD(Estimated Theta)")
+leg.text<-c("Sigma_dyad = .1","","Sigma_dyad = 1","", "Sigma_dyad = 10")
+legend("topleft",leg.text,pch=c(1,0,2,0,3),col=c("black","white","black","white","black"),bty="n")
+}
+
+ThetaPlotFun(MultiOut,ParMatrix)
+MultiOutSim<-MultiOut2
+
+
+SigmaDyadPlotFun<-function(MultiOutSim,ParMatrix){
+  beta0_in<-sapply(ParMatrix$Beta_0,Rep.fun,m=ParMatrix$Reps[1])
+  theta_in<-sapply(ParMatrix$Theta,Rep.fun,m=ParMatrix$Reps[1])
+  sigmadyad_in<-sapply(ParMatrix$Sigma_dyad,Rep.fun,m=ParMatrix$Reps[1])
+
+beta0_out<-matrix(NA,ncol=dim(ParMatrix)[1],nrow=ParMatrix$Reps[1])
+sigmaresid_out<-matrix(NA,ncol=dim(ParMatrix)[1],nrow=ParMatrix$Reps[1])
+theta_out<-matrix(NA,ncol=dim(ParMatrix)[1],nrow=ParMatrix$Reps[1])
+sigmadyad_out<-matrix(NA,ncol=dim(ParMatrix)[1],nrow=ParMatrix$Reps[1])
+
+for(j in 1:dim(ParMatrix)[1]){
+  for(i in 1:ParMatrix$Reps[1]){
+    beta0_out[i,j]<-MultiOutSim[[1]][[j]][[i]]$coefs[[1]]
+    theta_out[i,j]<-MultiOutSim[[1]][[j]][[i]]$coefs[[2]]
+    sigmaresid_out[i,j]<-MultiOutSim[[1]][[j]][[i]]$resid[[1]]
+    sigmadyad_out[i,j]<-MultiOutSim[[1]][[j]][[i]]$REmat[[1,4]]
+  }
+}
+
+  par(mfrow=c(1,2))
+plot(as.vector(sigmadyad_out)~as.vector(sigmadyad_in),type="p",xlab="True Sigma_dyad",ylab="Estimated Sigma_dyad",pch=as.vector(as.factor(theta_in)))
+
+sigmad.dat<-as.data.frame(cbind(as.vector(sigmadyad_in),as.vector(sigmadyad_out),as.vector(theta_in)))
+names(sigmad.dat)<-c("Sigmad_in","Sigmad_out","Theta_in")
+
+sigmad.med<-tapply(as.numeric(as.character(sigmad.dat$Sigmad_out)),list(sigmad.dat$Sigmad_in,sigmad.dat$Theta_in),median)
+
+sigmad.med2<-as.vector(sigmad.med)
+theta.in<-rep(c(-.01,2,-2),each=3)
+sigmadyad.in<-rep(c(.1,1,10),times=3)
+
+plot(sigmad.med2~sigmadyad.in,type="p",pch=as.numeric(as.factor(theta.in)),xlab="True Sigma_dyad",ylab="Median(Estimated Sigma_dyad)",log='x')
+leg.text<-c("Theta = -2","","Theta = -0.01","", "Theta = 2")
+legend("topleft",leg.text,pch=c(1,0,2,0,3),col=c("black","white","black","white","black"),bty="n")
+}
+
+SigmaDyadPlotFun(MultiOut,ParMatrix)
+
+
+@
+
+\section{Saturated Design Matrix}
+To create a saturated design matrix, I drew group sizes for all missing blocks from the observed distribution of group sizes, and then simulated response values as in the simulation above.
+
+<<Saturated Design Sim >>=
+MultiOut2<-MultiParamSim(ParMatrix=ParMatrix,data=Data.nodup,GroupFillin="TRUE")
+dput(MultiOut2,"FillinTrueSimOutput_120411")
+@
+
+<<pairsbygroupsize,echo=T>>=
+pairsobs<-table(Data.nodup$obs.period)
+
+grpsize<-rep(NA,length(pairsobs))
+for(i in 1:length(grpsize)){
+  grpsize[i]<-subset(Data.nodup,obs.period==i)$groupsize[1]
+}
+
+possiblepairs<-grpsize*(grpsize-1)/2
+plot(as.vector(pairsobs)~grpsize,type="p",xlab="Groupsize",ylab="Pairs observed",log="xy")
+plot(as.vector(pairsobs)~possiblepairs,type="p",xlab="Possible pairs",ylab="Pairs observed",log="xy")
+
+pairstoposspairs<-pairsobs/possiblepairs
+
+dat.new<-as.data.frame(cbind(pairstoposspairs,grpsize,pairsobs,possiblepairs))
+names(dat.new)<-c("PairRatio","Grpsize","PairsObs","PossiblePairs")
+plot(PairRatio~grpsize,data=dat.new,log="xy")
+
+#-- I could fit the model of PairRatio using just the numerator, with possible pairs as an offset...--#
+
+
+#-- fit observed pairs as a function of possible pairs; then fit residuals as a function of group size...? --#
+ObsCountFit<-glm(PairsObs~PossiblePairs,family=poisson,data=na.omit(dat.new))
+
+new2<-na.omit(dat.new)
+new2$ObsCountResids<-ObsCountFit$resid
+
+GrpsizeFit<-glm(ObsCountResids~log(Grpsize),data=new2)
+
+plot(possiblepairs~grpsize,log="xy")
+PossiblePairsFit<-glm(possiblepairs~log(grpsize),family="poisson")
+
+#-- in order for the contact rate (lambda) to remain constant, the number of contacts must increase in groups of larger size.  analogously, to keep the number of contacts constant, the lambda term must decrease with increasing group size. --#
+
+#-- based on the glm above (PossiblePairsFit), to remove the effect of increasing pair options with increasing group size, we need theta to be ~ -2 and Beta_0 to be about -.74.
+
+
+
+
+@
+
+\end{document}
