@@ -114,29 +114,38 @@ DesignBuiltFun<-function(data,ParVector){
     MinGrp<-10
     MaxGrp<-500
     PropDyads<-1
-    PropPeriods<-1
+    PropPeriods<-.9
     
     #-- 1) generate a sequence of integers (group sizes) that increases logarithmically from the min to the max observed group size (approx 10 to 500).  These will become column "labels" for the design matrix.
   SimGrpSize<-floor(exp(seq(log(MinGrp),log(MaxGrp),length.out=NoPeriods)))
     
     #-- 2) build a response screen that drops a subset of dyad observations from each group, so that the number of dyad pairs observed in each column is no greater than n*(n-1)/2, and subsample from this reduced saturated dataset, based on proportions specified in PropDyads and PropPeriods.
       ResponseScreen<-matrix(NA,nrow=NoDyads,ncol=NoPeriods)
+      PeriodsToKeep<-sample(1:NoPeriods,size=floor(PropPeriods*NoPeriods),rep=F)
+      PeriodsToKeep<-PeriodsToKeep[order(PeriodsToKeep)]  #-- reorders previous vector.
+      ResponseScreen[, (1:dim(ResponseScreen)[2]) %in% PeriodsToKeep]<-0
+      ResponseScreen[,!((1:dim(ResponseScreen)[2]) %in% PeriodsToKeep)]<-NA
+      
+      k<-SimGrpSize*(SimGrpSize-1)/2
+      for(j in 1:dim(ResponseScreen)[2]){
+        samp<-sample(1:NoDyads,size=floor(min(k[j]*PropDyads,NoDyads)),rep=F)
+        ResponseScreen[samp,j]<-0
+        ResponseScreen[!((1:dim(ResponseScreen)[1] %in% samp)),j]<-NA
+      }
     
-     for(j in 1:dim(ResponseScreen)[2]){
-        PeriodsToKeep<-sample(1:NoPeriods,size=floor(PropPeriods*NoPeriods),rep=F)
-        k<-SimGrpSize[j]*(SimGrpSize[j]-1)/2
-            #-- I want to sample k intergers between 1 and NoDyads.
-        DyadsToKeep<-sample(1:NoDyads,size=floor(min(k*PropDyads,NoDyads)),rep=F)
-          for(i in 1:NoDyads){
-            ResponseScreen[i,j]<-ifelse(i %in% DyadsToKeep & j %in% PeriodsToKeep,0,NA)
-          }
-        }
+#        ResponseScreen[1:dim(ResponseScreen)[1] %in% DyadsToKeep, 1:dim(ResponseScreen)[2] %in% PeriodsToKeep]<-0
+#        ResponseScreen[1:dim(ResponseScreen)[1]!(%in% DyadsToKeep),!(%in% PeriodsToKeep)]<-NA
+#          for(i in 1:NoDyads){
+#            ResponseScreen[i,j]<-ifelse(i %in% DyadsToKeep & j %in% PeriodsToKeep,0,NA)
+#          }
+#        }
       }
     
     #-- 3) run Reps number of simulations through NewSimFun, which simulates response values, fits the lmer function, and extracts desired model estimates.  
   
     OutList<-vector("list",length=Reps)
     for(i in 1:length(OutList)){   
+      set.seed(seed=i)    #-- this may not work... check. 
 OutList[[i]]<-NewSimFun(Beta_0=Beta_0,Theta=Theta,Sigma_dyad=Sigma_dyad,Sigma_gamma=Sigma_gamma,ResponseScreen=ResponseScreen,NoDyads=NoDyads,NoPeriods=NoPeriods,SimGrpSize=SimGrpSize)
 }
     return(OutList)
@@ -156,23 +165,29 @@ NewSimFun<-function(Beta_0=Beta0,Theta=Theta,Sigma_dyad=Sigma_dyad,Sigma_gamma=S
      DyadMat<-matrix(NA,nrow=NoDyads,ncol=NoPeriods)
      PeriodREMat<-matrix(NA,nrow=NoDyads,ncol=NoPeriods)
      GrpsizeMat<-matrix(NA,nrow=NoDyads,ncol=NoPeriods)
-
-     ResponseMat[is.na(ResponseScreen)==TRUE]<-NA  
-     ResponseMat[is.na(ResponseScreen)==FALSE]<-
-      for(i in 1:dim(ResponseMat)[1]){ 
-        for(j in 1:dim(ResponseMat)[2]){
-           if(is.na(ResponseScreen[i,j])==TRUE){
-             ResponseMat[i,j]<-NA
-             DyadMat[i,j]<-NA
-             PeriodREMat[i,j]<-NA
-           } else {
-             ResponseMat[i,j]<-rpois(1,exp(Beta_0+DyadEffect[i]+PeriodEffect[j]))
-             DyadMat[i,j]<-i
-             PeriodREMat[i,j]<-j
-             GrpsizeMat[i,j]<-SimGrpSize[j]
-           }
-        }
-      }
+ DyadEffectMat<-matrix(rep(DyadEffect,times=dim(ResponseMat)[2]),nrow=length(DyadEffect),ncol=length(PeriodEffect),byrow=F)      PeriodEffectMat<-matrix(rep(PeriodEffect,times=dim(ResponseMat)[1]),nrow=length(DyadEffect),ncol=length(PeriodEffect),byrow=T)
+ DyadMat<-matrix(rep(1:length(DyadEffect),times=dim(ResponseMat)[2]),nrow=length(DyadEffect),ncol=length(PeriodEffect),byrow=F)
+ PeriodMat<-matrix(rep(1:length(PeriodEffect),times=dim(ResponseMat)[1]),nrow=length(DyadEffect),ncol=length(PeriodEffect),byrow=T)
+      
+     ResponseMat<-rpois(1,exp(Beta_0+DyadEffectMat+PeriodEffectMat))
+     ResponseMat[is.na(ResponseScreen)==TRUE]<-NA  #-- test to eliminate for-loop
+     DyadMat[is.na(ResponseScreen)==TRUE]<-NA       
+     PeriodMat[is.na(ResponseScreen)==TRUE]<-NA
+      
+#      for(i in 1:dim(ResponseMat)[1]){ 
+#        for(j in 1:dim(ResponseMat)[2]){
+#           if(is.na(ResponseScreen[i,j])==TRUE){
+#             ResponseMat[i,j]<-NA
+#             DyadMat[i,j]<-NA
+#             PeriodREMat[i,j]<-NA
+#           } else {
+#             ResponseMat[i,j]<-rpois(1,exp(Beta_0+DyadEffect[i]+PeriodEffect[j]))
+#             DyadMat[i,j]<-i
+#             PeriodREMat[i,j]<-j
+#             GrpsizeMat[i,j]<-SimGrpSize[j]
+#           }
+#        }
+#      }
     modeldata<-na.omit(as.data.frame(cbind(as.vector(ResponseMat),as.vector(DyadMat),as.vector(PeriodREMat),as.vector(GrpsizeMat))))
 names(modeldata)<-c("Contacts","DyadID","PeriodID","Groupsize")
     ModelFit<-lmer(Contacts~log(Groupsize)+(1|DyadID)+(1|PeriodID),family=poisson,data=modeldata)
