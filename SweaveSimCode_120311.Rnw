@@ -142,6 +142,11 @@ Build functions to simulate and construct models.  The following two functions a
   \end{itemize}
 \end{itemize}
 
+
+Repeatability is estimated here based on the methods outlined in Nakagawa (2010).  First note that the variance of a Poisson distribution on the log link is $ln(1/exp(\beta_{0}+1))$.  This allows for repeatability to be estimated as 
+\[R_{lognormalM} = \frac{\sigma_{\alpha}^2}{\sigma_{\alpha}^2+\omega\times ln(1/exp(\beta_{0}+1)}\]
+
+where $R_{lnormM}$ is the latent-scale repeatability for Poisson data with multiplicative overdispersion ($\omega$ is the multiplicative dispersion parameter here).  We fixed $\beta_0$ and $\theta$ so that they maintain the same grand mean over all simuluations, since the log-transformation of count data is not variance stabilizing (and thus the latent-scale repeatability depends on the grant mean, $\beta_{0}+\theta$).  
 <<simchunk,echo=T>>=
 #-- build some utility functions for applys in big simulation function --#
 Gamma.fun<-function(GrpSize,Theta,Sigma_gamma){rnorm(1,Theta*GrpSize,Sigma_gamma)}
@@ -153,6 +158,8 @@ Pois.fun<-function(k){rpois(1,exp(k))}
 
 #-- require lme4, since models are built using lmer --#
 require(lme4)
+install.packages("rptR",repos="http://R-Forge.R-project.org")
+require(rptR) 
 
 NewSimFun<-function(Beta_0=Beta0,Theta=Theta,Sigma_dyad=Sigma_dyad,Sigma_gamma=Sigma_gamma,ResponseScreen=ResponseScreen,NoDyads=NoDyads,NoPeriods=NoPeriods,SimGrpSize=SimGrpSize){
     
@@ -192,18 +199,21 @@ NewSimFun<-function(Beta_0=Beta0,Theta=Theta,Sigma_dyad=Sigma_dyad,Sigma_gamma=S
 
 
 DesignBuildFun<-function(data,ParVector){
-   NoDyads<-ParVector$NoDyads
-   NoPeriods<-ParVector$NoPeriods
-   Sigma_dyad<-ParVector$Sigma_dyad
-   Theta<-ParVector$Theta
-   Sigma_gamma<-ParVector$Sigma_gamma
-   Beta_0 <- ParVector$Sigma_gamma
-   Reps<-ParVector$Reps
-   MinGrp<-ParVector$MinGrp
-   MaxGrp<-ParVector$MaxGrp
-    
-    #-- 1) 
-  SimGrpSize<-floor(exp(seq(log(MinGrp),log(MaxGrp),length.out=NoPeriods)))
+  #-- try this "with" business from John Drake to allocate parameter vector: --#
+  with(as.list(ParVector),
+       {
+#   NoDyads<-ParVector$NoDyads
+#   NoPeriods<-ParVector$NoPeriods
+#   Sigma_dyad<-ParVector$Sigma_dyad
+#   Theta<-ParVector$Theta
+#   Sigma_gamma<-ParVector$Sigma_gamma
+#   Beta_0 <- ParVector$Sigma_gamma
+#   Reps<-ParVector$Reps
+#   MinGrp<-ParVector$MinGrp
+#   MaxGrp<-ParVector$MaxGrp
+         
+      #-- 1) 
+SimGrpSize<-floor(exp(seq(log(MinGrp),log(MaxGrp),length.out=NoPeriods)))
     
     #-- 2) 
       ResponseScreen<-matrix(NA,nrow=NoDyads,ncol=NoPeriods)
@@ -230,6 +240,8 @@ DesignBuildFun<-function(data,ParVector){
       OutMat[i,]<-k
 }
     return(list(OutList,OutMat))
+    }
+  )
 }
 
 #-- trial run
