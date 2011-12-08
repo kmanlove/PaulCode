@@ -206,12 +206,14 @@ NewSimFun<-function(Beta_0=Beta0,
 
   LogModelFit<-lmer(Contacts~log(Groupsize)+(1|DyadID)+(1|PeriodID),
                       family=poisson,
-                      data=modeldata)
-  log.DyadR<-rpt.poisGLMM.multi(y=as.vector(ResponseMat),
-                                groups=as.vector(DyadID),
+                      data=modeldata
+                      #,control=lmeControl(opt="optim")
+                      )
+  log.DyadR<-rpt.poisGLMM.multi(y=modeldata$Contacts,
+                                groups=modeldata$DyadID,
                                 link="log")
-  log.PeriodR<-rpt.poisGLMM.multi(y=as.vector(ResponseMat),
-                                groups=as.vector(PeriodID),
+  log.PeriodR<-rpt.poisGLMM.multi(y=modeldata$Contacts,
+                                groups=modeldata$PeriodID,
                                 link="log")
      
   k<-summary(LogModelFit)
@@ -227,25 +229,28 @@ NewSimFun<-function(Beta_0=Beta0,
      
   SqrtModelFit<-lmer(Contacts~log(Groupsize)+(1|DyadID)+(1|PeriodID),
                        family=poisson,
-                       data=modeldata)
+                       data=modeldata
+                       #,control=lmeControl(opt="optim")
+                       )
   sqrt.DyadR<-rpt.poisGLMM.multi(y=as.vector(ResponseMat),
                                    groups=as.vector(DyadID),
                                    link="sqrt")
   sqrt.PeriodR<-rpt.poisGLMM.multi(y=as.vector(ResponseMat),
                                  groups=as.vector(PeriodID),
                                  link="sqrt")
-  j<-summary(SqrtModelFit)
-  sqrt.beta0<-j@coefs[1]
-  sqrt.theta<-j@coefs[2]
-  sqrt.dyad.sd<-j@REmat[1,4]
-  sqrt.period.sd<-j@REmat[2,4]
-  sqrt.resid<-j@sigma
-  sqrt.dyad.pt<-sqrt.DyadR$R.link
-  sqrt.dyad.se<-sqrt.DyadR$se.link
-  sqrt.period.pt<-sqrt.PeriodR$R.link
-  sqrt.period.se<-sqrt.PeriodR$se.link
      
-  SimOutVec<-c(
+  j<-summary(SqrtModelFit)
+    beta0<-j@coefs[1]
+    theta<-j@coefs[2]
+    dyad.sd<-j@REmat[1,4]
+    period.sd<-j@REmat[2,4]
+    resid<-j@sigma
+    dyad.pt<-sqrt.DyadR$R.link
+    dyad.se<-sqrt.DyadR$se.link
+    period.pt<-sqrt.PeriodR$R.link
+    period.se<-sqrt.PeriodR$se.link
+     
+  LogOut<-c(
     log.beta0,
     log.theta,
     log.dyad.sd,
@@ -254,23 +259,26 @@ NewSimFun<-function(Beta_0=Beta0,
     log.dyad.pt,
     log.dyad.se,
     log.period.pt,
-    log.period.se,
-    sqrt.beta0,
-    sqrt.theta,
-    sqrt.dyad.sd,
-    sqrt.period.sd,
-    sqrt.resid,
-    sqrt.dyad.pt,
-    sqrt.dyad.se,
-    sqrt.period.pt,
-    sqrt.period.se
+    log.period.se
     )
-)
+     
+  SqrtOut<-c(
+    beta0,
+    theta,
+    dyad.sd,
+    period.sd,
+    resid,
+    dyad.pt,
+    dyad.se,
+    period.pt,
+    period.se
+    )
+     
  #-- add in individual estimated dyad effects.  --#'
  #-- get this function to return an indicator for convergence problems.
  #-- add Nakagawa's (2010) calculation of R for latent vs. observed. --#
       
-  return(SimOutVec)
+  return(LogOut,SqrtOut)
 }
 
 
@@ -278,18 +286,10 @@ DesignBuildFun<-function(data,ParVector){
   #-- try this "with" business from John Drake to allocate parameter vector: --#
   with(as.list(ParVector),
        {
-#   NoDyads<-ParVector$NoDyads
-#   NoPeriods<-ParVector$NoPeriods
-#   Sigma_dyad<-ParVector$Sigma_dyad
-#   Theta<-ParVector$Theta
-#   Sigma_gamma<-ParVector$Sigma_gamma
-#   Beta_0 <- ParVector$Sigma_gamma
-#   Reps<-ParVector$Reps
-#   MinGrp<-ParVector$MinGrp
-#   MaxGrp<-ParVector$MaxGrp
          
       #-- 1) 
-SimGrpSize<-floor(exp(seq(log(MinGrp),log(MaxGrp),length.out=NoPeriods)))
+SimGrpSize<-floor(
+  exp(seq(log(MinGrp),log(MaxGrp),length.out=NoPeriods)))
     
     #-- 2) 
       ResponseScreen<-matrix(NA,nrow=NoDyads,ncol=NoPeriods)
@@ -307,7 +307,8 @@ SimGrpSize<-floor(exp(seq(log(MinGrp),log(MaxGrp),length.out=NoPeriods)))
     
     #-- 3)   
     OutList<-vector("list",length=Reps)
-    OutMat<-matrix(NA,nrow=Reps,ncol=5)
+    LogOutMat<-matrix(NA,nrow=Reps,ncol=9)
+    SqrtOutMat<-matrix(NA,nrow=Reps,ncol=9)
 
     for(i in 1:length(OutList)){   
       set.seed(seed=i)    #-- this may not work... check. 
@@ -320,8 +321,9 @@ SimGrpSize<-floor(exp(seq(log(MinGrp),log(MaxGrp),length.out=NoPeriods)))
                    NoPeriods=NoPeriods,
                    SimGrpSize=SimGrpSize)
       
-      OutList[[i]]<-k
-      OutMat[i,]<-k
+      LogOut[[i]]<-k$
+      LogOutMat[i,]<-k$LogOut
+      SqrtOutMat[i,]<-k$SqrtOut
 }
     return(list(OutList,OutMat))
     }
