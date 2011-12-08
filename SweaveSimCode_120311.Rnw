@@ -147,6 +147,10 @@ Repeatability is estimated here based on the methods outlined in Nakagawa (2010)
 \[R_{lognormalM} = \frac{\sigma_{\alpha}^2}{\sigma_{\alpha}^2+\omega\times ln(1/exp(\beta_{0}+1)}\]
 
 where $R_{lnormM}$ is the latent-scale repeatability for Poisson data with multiplicative overdispersion ($\omega$ is the multiplicative dispersion parameter here).  We fixed $\beta_0$ and $\theta$ so that they maintain the same grand mean over all simuluations, since the log-transformation of count data is not variance stabilizing (and thus the latent-scale repeatability depends on the grant mean, $\beta_{0}+\theta$).  
+
+
+
+
 <<simchunk,echo=T>>=
 #-- build some utility functions for applys in big simulation function --#
 Gamma.fun<-function(GrpSize,Theta,Sigma_gamma){rnorm(1,Theta*GrpSize,Sigma_gamma)}
@@ -170,7 +174,7 @@ NewSimFun<-function(Beta_0=Beta0,
                     NoDyads=NoDyads,
                     NoPeriods=NoPeriods,
                     SimGrpSize=SimGrpSize){
-    
+#    with(as.list(ParVector),{
      DyadEffect<-rnorm(NoDyads,0,Sigma_dyad)
      PeriodEffect<-rnorm(NoPeriods,Theta*log(SimGrpSize),Sigma_gamma)
      ResponseMat<-matrix(NA,nrow=NoDyads,ncol=NoPeriods,byrow=F)
@@ -209,76 +213,80 @@ NewSimFun<-function(Beta_0=Beta0,
                       data=modeldata
                       #,control=lmeControl(opt="optim")
                       )
-  log.DyadR<-rpt.poisGLMM.multi(y=modeldata$Contacts,
-                                groups=modeldata$DyadID,
-                                link="log")
-  log.PeriodR<-rpt.poisGLMM.multi(y=modeldata$Contacts,
-                                groups=modeldata$PeriodID,
-                                link="log")
+#  log.DyadR<-rpt.poisGLMM.multi(y=modeldata$Contacts,
+#                                groups=modeldata$DyadID,
+#                                link="log")
+#  log.PeriodR<-rpt.poisGLMM.multi(y=modeldata$Contacts,
+#                                groups=modeldata$PeriodID,
+#                                link="log")
      
+ #   })
   k<-summary(LogModelFit)
   log.beta0<-k@coefs[1]
   log.theta<-k@coefs[2]
   log.dyad.sd<-k@REmat[1,4]
   log.period.sd<-k@REmat[2,4]
   log.resid<-k@sigma
-  log.dyad.pt<-log.DyadR$R.link
-  log.dyad.se<-log.DyadR$se.link
-  log.period.pt<-log.PeriodR$R.link
-  log.period.se<-log.PeriodR$se.link
+#  log.dyad.pt<-log.DyadR$R.link
+#  log.dyad.se<-log.DyadR$se.link
+#  log.period.pt<-log.PeriodR$R.link
+#  log.period.se<-log.PeriodR$se.link
      
-  SqrtModelFit<-lmer(Contacts~log(Groupsize)+(1|DyadID)+(1|PeriodID),
-                       family=poisson,
-                       data=modeldata
+#  SqrtModelFit<-lmer(Contacts~log(Groupsize)+(1|DyadID)+(1|PeriodID),
+#                       family=poisson,
+#                       data=modeldata
                        #,control=lmeControl(opt="optim")
-                       )
-  sqrt.DyadR<-rpt.poisGLMM.multi(y=as.vector(ResponseMat),
-                                   groups=as.vector(DyadID),
-                                   link="sqrt")
-  sqrt.PeriodR<-rpt.poisGLMM.multi(y=as.vector(ResponseMat),
-                                 groups=as.vector(PeriodID),
-                                 link="sqrt")
+#                       )
+#  sqrt.DyadR<-rpt.poisGLMM.multi(y=as.vector(ResponseMat),
+#                                   groups=as.vector(DyadID),
+#                                   link="sqrt")
+#  sqrt.PeriodR<-rpt.poisGLMM.multi(y=as.vector(ResponseMat),
+#                                 groups=as.vector(PeriodID),
+#                                 link="sqrt")
      
-  j<-summary(SqrtModelFit)
-    beta0<-j@coefs[1]
-    theta<-j@coefs[2]
-    dyad.sd<-j@REmat[1,4]
-    period.sd<-j@REmat[2,4]
-    resid<-j@sigma
-    dyad.pt<-sqrt.DyadR$R.link
-    dyad.se<-sqrt.DyadR$se.link
-    period.pt<-sqrt.PeriodR$R.link
-    period.se<-sqrt.PeriodR$se.link
+#  j<-summary(SqrtModelFit)
+#    beta0<-j@coefs[1]
+#    theta<-j@coefs[2]
+#    dyad.sd<-j@REmat[1,4]
+#    period.sd<-j@REmat[2,4]
+#    resid<-j@sigma
+#    dyad.pt<-sqrt.DyadR$R.link
+#    dyad.se<-sqrt.DyadR$se.link
+#    period.pt<-sqrt.PeriodR$R.link
+#    period.se<-sqrt.PeriodR$se.link
      
   LogOut<-c(
     log.beta0,
     log.theta,
     log.dyad.sd,
     log.period.sd,
-    log.resid,
-    log.dyad.pt,
-    log.dyad.se,
-    log.period.pt,
-    log.period.se
+    log.resid
+#    ,
+#    log.dyad.pt,
+#    log.dyad.se,
+#    log.period.pt,
+#    log.period.se
     )
      
-  SqrtOut<-c(
-    beta0,
-    theta,
-    dyad.sd,
-    period.sd,
-    resid,
-    dyad.pt,
-    dyad.se,
-    period.pt,
-    period.se
-    )
+#  SqrtOut<-c("a"
+#    beta0,
+#    theta,
+#    dyad.sd,
+#    period.sd,
+#    resid,
+#    dyad.pt,
+#    dyad.se,
+#    period.pt,
+#    period.se
+#    )
      
  #-- add in individual estimated dyad effects.  --#'
  #-- get this function to return an indicator for convergence problems.
  #-- add Nakagawa's (2010) calculation of R for latent vs. observed. --#
       
-  return(LogOut,SqrtOut)
+#  return(LogOut,SqrtOut)
+       return(LogOut)
+
 }
 
 
@@ -304,14 +312,14 @@ SimGrpSize<-floor(
         ResponseScreen[samp,j]<-0
         ResponseScreen[!((1:dim(ResponseScreen)[1] %in% samp)),j]<-NA
       }
-    
+    #   })
     #-- 3)   
-    OutList<-vector("list",length=Reps)
-    LogOutMat<-matrix(NA,nrow=Reps,ncol=9)
-    SqrtOutMat<-matrix(NA,nrow=Reps,ncol=9)
+#    OutList<-vector("list",length=Reps)
+    LogOutMat<-matrix(NA,nrow=Reps,ncol=5)
+#    SqrtOutMat<-matrix(NA,nrow=Reps,ncol=9)
 
-    for(i in 1:length(OutList)){   
-      set.seed(seed=i)    #-- this may not work... check. 
+    for(i in 1:Reps){   
+     # set.seed(seed=i)    #-- this may not work... check. 
       k<-NewSimFun(Beta_0=Beta_0,
                    Theta=Theta,
                    Sigma_dyad=Sigma_dyad,
@@ -321,31 +329,38 @@ SimGrpSize<-floor(
                    NoPeriods=NoPeriods,
                    SimGrpSize=SimGrpSize)
       
-      LogOut[[i]]<-k$
-      LogOutMat[i,]<-k$LogOut
-      SqrtOutMat[i,]<-k$SqrtOut
+#      LogOut[[i]]<-k$
+      LogOutMat[i,]<-k
+#      SqrtOutMat[i,]<-k$SqrtOut
 }
-    return(list(OutList,OutMat))
+    return(list(LogOutMat))
     }
   )
 }
 
-#-- trial run
-ParMatrix<-read.csv("ParamMat2.csv",header=T,sep=";")
-DesignOut<-DesignBuildFun(ParVector=ParMatrix[1,],data=Data.nodup)
-
-
 
 
 #-- build a function to run multiple parameter sets --#
-MultiParamSim<-function(ParMatrix,data,GroupFillin){
+MultiParamSim<-function(ParMatrix,data){
   MultiOut<-vector("list",dim(ParMatrix)[1])
-    for(i in 1:dim(ParMatrix)[1]){ SingleSim<-DesignSimBuild(ParVector=as.vector(ParMatrix[i,]),data=data,GroupFillin=GroupFillin)
+    for(i in 1:dim(ParMatrix)[1]){ SingleSim<-DesignBuildFun(ParVector=as.vector(ParMatrix[i,]),data=data)
       MultiOut[[i]]<-SingleSim
+      write.csv(MultiOut[[i]],paste("SimOutput/ParamSet", i, ".csv", sep=""))
+
     }
   OutList<-list(MultiOut,ParMatrix)
   return(OutList)
 }
+
+#-- trial run
+ParMatrix<-read.csv("ParamMat2.csv",header=T,sep=";")
+ParMatrix<-subset(ParMatrix,Sigma_gamma<10 & Sigma_dyad<10)
+DesignOut<-DesignBuildFun(ParVector=ParMatrix[1,],data=Data.nodup)
+
+MultiOut<-MultiParamSim(ParMatrix,data=Data.nodup)
+dput(MultiOut,"MultiOut_120711")
+  #-- began run at 9:22.  --#
+
 
 #-- old code; now maybe scratch.  
 
